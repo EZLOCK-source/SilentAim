@@ -1,0 +1,237 @@
+-- // Services // -- @canyoulovemeback on discord / supercoolboi34
+local G = game
+local Run_Service = G:GetService("RunService")
+local Players = G:GetService("Players")
+local UserInputService = G:GetService("UserInputService")
+local Local_Player = Players.LocalPlayer
+local Mouse = Local_Player:GetMouse()
+local Current_Camera = G:GetService("Workspace").CurrentCamera
+local Replicated_Storage = G:GetService("ReplicatedStorage")
+local StarterGui = G:GetService("StarterGui")
+local Workspace = G:GetService("Workspace")
+local SoundService = G:GetService("SoundService")
+
+-- // Dynamic Path Finding Function // -- @canyoulovemeback on discord / supercoolboi34
+local function findPath(object, path)
+    local segments = string.split(path, ".")
+    local current = object
+    for _, segment in ipairs(segments) do
+        if current and current:FindFirstChild(segment) then
+            current = current[segment]
+        else
+            return nil
+        end
+    end
+    return current
+end
+
+-- // Variables // -- @canyoulovemeback on discord / supercoolboi34
+local Target = nil
+local V2 = Vector2.new
+local Fov = Drawing.new("Circle")
+local lastToolUse = 0
+local HitPoint = Drawing.new("Circle")
+local FovParts = {}  -- Store the parts for square and triangle FOV
+local wallCheckFrequency = 10  -- Perform wall check every 10 frames
+local frameCounter = 0
+local lastSwitchTime = tick()
+local fallStartTime = {}
+
+-- // Game Load Check // -- @canyoulovemeback on discord / supercoolboi34
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+-- // Clear FOV Parts // -- @canyoulovemeback on discord / supercoolboi34
+local function clearFovParts()
+    for _, part in pairs(FovParts) do
+        part:Remove()
+    end
+    FovParts = {}
+end
+
+-- // Update FOV Function // -- @canyoulovemeback on discord / supercoolboi34
+local function updateFov()
+    local settings = getgenv().SharpSSilent.FovSettings
+    clearFovParts()
+    if settings.DynamicFOV.Enabled then
+        local dynamicSettings = settings.DynamicFOV
+        if dynamicSettings.Type == "Speed" and Local_Player.Character and Local_Player.Character:FindFirstChild("HumanoidRootPart") then
+            local speed = Local_Player.Character.HumanoidRootPart.Velocity.Magnitude
+            settings.FovRadius = math.clamp(dynamicSettings.MinFOV + (speed / dynamicSettings.SpeedThreshold) * (dynamicSettings.MaxFOV - dynamicSettings.MinFOV), dynamicSettings.MinFOV, dynamicSettings.MaxFOV)
+        elseif dynamicSettings.Type == "Health" and Local_Player.Character and Local_Player.Character:FindFirstChild("Humanoid") then
+            local healthPercent = (Local_Player.Character.Humanoid.Health / Local_Player.Character.Humanoid.MaxHealth) * 100
+            settings.FovRadius = math.clamp(dynamicSettings.MinFOV + ((100 - healthPercent) / dynamicSettings.HealthThreshold) * (dynamicSettings.MaxFOV - dynamicSettings.MinFOV), dynamicSettings.MinFOV, dynamicSettings.MaxFOV)
+        end
+    end
+
+    if settings.FovShape == "Square" then
+        local halfSize = settings.FovRadius / 2
+        local corners = {
+            V2(Mouse.X - halfSize, Mouse.Y - halfSize),
+            V2(Mouse.X + halfSize, Mouse.Y - halfSize),
+            V2(Mouse.X + halfSize, Mouse.Y + halfSize),
+            V2(Mouse.X - halfSize, Mouse.Y + halfSize)
+        }
+        for i = 1, 4 do
+            local line = Drawing.new("Line")
+            line.Visible = settings.FovVisible
+            line.From = corners[i]
+            line.To = corners[i % 4 + 1]
+            line.Color = settings.FovColor
+            line.Thickness = settings.FovThickness
+            line.Transparency = settings.FovTransparency
+            table.insert(FovParts, line)
+        end
+    elseif settings.FovShape == "Triangle" then
+        local points = {
+            V2(Mouse.X, Mouse.Y - settings.FovRadius),
+            V2(Mouse.X + settings.FovRadius * math.sin(math.rad(60)), Mouse.Y + settings.FovRadius * math.cos(math.rad(60))),
+            V2(Mouse.X - settings.FovRadius * math.sin(math.rad(60)), Mouse.Y + settings.FovRadius * math.cos(math.rad(60)))
+        }
+        for i = 1, 3 do
+            local line = Drawing.new("Line")
+            line.Visible = settings.FovVisible
+            line.From = points[i]
+            line.To = points[i % 3 + 1]
+            line.Color = settings.FovColor
+            line.Thickness = settings.FovThickness
+            line.Transparency = settings.FovTransparency
+            table.insert(FovParts, line)
+        end
+    else 
+        Fov.Visible = settings.FovVisible
+        Fov.Radius = settings.FovRadius
+        Fov.Position = V2(Mouse.X, Mouse.Y + (G:GetService("GuiService"):GetGuiInset().Y))
+        Fov.Color = settings.FovColor
+        Fov.Thickness = settings.FovThickness
+        Fov.Transparency = settings.FovTransparency
+        Fov.Filled = settings.Filled
+        if settings.Filled then
+            Fov.Transparency = settings.FillTransparency
+        end
+    end
+end
+
+-- // Notification Function // -- @canyoulovemeback on discord / supercoolboi34
+local function sendNotification(title, text, icon)
+    if not getgenv().SharpSSilent.ToggleNotification then
+        StarterGui:SetCore("SendNotification", {
+            Title = title,
+            Text = text,
+            Icon = icon,
+            Duration = 5
+        })
+    end
+end
+
+-- // Watermark Function // -- @canyoulovemeback on discord / supercoolboi34
+local function showWatermark()
+    if getgenv().SharpSSilent.Watermark.Enabled then
+        local screenGui = Instance.new("ScreenGui", game.CoreGui)
+        local frame = Instance.new("Frame", screenGui)
+        frame.Size = UDim2.new(0, 400, 0, 150)  -- Increased size for better visibility
+        frame.Position = UDim2.new(0.5, -200, 0.5, -75)  -- Centered on screen
+        frame.BackgroundTransparency = 1
+        frame.AnchorPoint = Vector2.new(0.5, 0.5)
+        frame.ClipsDescendants = true
+        frame.ZIndex = 2
+
+        local title = Instance.new("TextLabel", frame)
+        title.Size = UDim2.new(1, 0, 0.6, 0)
+        title.Position = UDim2.new(0, 0, 0.1, 0)
+        title.BackgroundTransparency = 1
+        title.TextColor3 = Color3.fromRGB(0, 162, 232)
+        title.Text = "S"
+        title.Font = Enum.Font.GothamBlack
+        title.TextScaled = true
+        title.TextWrapped = true
+        title.ZIndex = 3
+
+        local subtitle = Instance.new("TextLabel", frame)
+        subtitle.Size = UDim2.new(1, 0, 0.3, 0)
+        subtitle.Position = UDim2.new(0, 0, 0.7, 0)
+        subtitle.BackgroundTransparency = 1
+        subtitle.TextColor3 = Color3.fromRGB(0, 162, 232)
+        subtitle.Text = "discord.gg/sharpcc"
+        subtitle.Font = Enum.Font.Gotham
+        subtitle.TextScaled = true
+        subtitle.TextWrapped = true
+        subtitle.ZIndex = 3
+
+        frame.BackgroundTransparency = 1
+        frame:TweenSizeAndPosition(
+            UDim2.new(0, 400, 0, 150),
+            UDim2.new(0.5, -200, 0.5, -75),
+            Enum.EasingDirection.Out,
+            Enum.EasingStyle.Quad,
+            0.5,
+            true
+        )
+
+        delay(7, function()
+            frame:TweenSizeAndPosition(
+                UDim2.new(0, 0, 0, 0),
+                UDim2.new(0.5, 0, 0.5, 0),
+                Enum.EasingDirection.Out,
+                Enum.EasingStyle.Quad,
+                0.5,
+                true,
+                function()
+                    frame:Destroy()
+                end
+            )
+        end)
+    end
+end
+
+-- // Main Aim Function // -- @canyoulovemeback on discord / supercoolboi34
+local function checkForTargets()
+    local closestPlayer = nil
+    local closestDistance = math.huge
+    local mousePosition = V2(Mouse.X, Mouse.Y + (G:GetService("GuiService"):GetGuiInset().Y))
+    local fovRadius = getgenv().SharpSSilent.FovSettings.FovRadius
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= Local_Player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local character = player.Character
+            local head = character:FindFirstChild("Head")
+            if head then
+                local headPosition = Current_Camera:WorldToScreenPoint(head.Position)
+                local screenPoint = V2(headPosition.X, headPosition.Y)
+                local distance = (mousePosition - screenPoint).Magnitude
+                if distance <= fovRadius and distance < closestDistance then
+                    closestPlayer = player
+                    closestDistance = distance
+                end
+            end
+        end
+    end
+
+    Target = closestPlayer
+end
+
+-- // Loop to Update FOV and Check for Targets // -- @canyoulovemeback on discord / supercoolboi34
+Run_Service.RenderStepped:Connect(function()
+    updateFov()
+    frameCounter = frameCounter + 1
+    if frameCounter % wallCheckFrequency == 0 then
+        checkForTargets()
+    end
+end)
+
+-- // User Input Check // -- @canyoulovemeback on discord / supercoolboi34
+UserInputService.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 and Target then
+        -- Adjust aim to target
+        local head = Target.Character and Target.Character:FindFirstChild("Head")
+        if head then
+            local headPosition = Current_Camera:WorldToScreenPoint(head.Position)
+            mousemoverel(headPosition.X - Mouse.X, headPosition.Y - Mouse.Y)
+        end
+    end
+end)
+
+-- // Initialization // -- @canyoulovemeback on discord / supercoolboi34
+sendNotification("Sharp Silent Aim", "Loaded Successfully!", "rbxassetid://12345678")
+showWatermark()
